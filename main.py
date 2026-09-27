@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -10,7 +11,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from rag import query_rag
@@ -36,6 +37,21 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
 )
+
+
+@app.get("/", include_in_schema=False)
+async def frontend() -> FileResponse:
+    return FileResponse(PROJECT_DIR / "index.html")
+
+
+@app.get("/app.js", include_in_schema=False)
+async def frontend_script() -> FileResponse:
+    return FileResponse(PROJECT_DIR / "app.js", media_type="application/javascript")
+
+
+@app.get("/style.css", include_in_schema=False)
+async def frontend_styles() -> FileResponse:
+    return FileResponse(PROJECT_DIR / "style.css", media_type="text/css")
 
 
 class AskRequest(BaseModel):
@@ -67,19 +83,19 @@ def _download_missing_files() -> None:
     if not missing:
         logger.info("RAG cache is present; skipping S3 downloads")
         return
-    required = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_ENDPOINT_URL_S3")
-    if not all(os.getenv(name) for name in required):
-        logger.warning("RAG cache is incomplete and S3 credentials are not configured")
+    endpoint = os.getenv("AWS_ENDPOINT_URL_S3")
+    if not endpoint:
+        logger.warning("RAG cache is incomplete and AWS_ENDPOINT_URL_S3 is not configured")
         return
     try:
-        import boto3
+        boto3 = importlib.import_module("boto3")
 
         client = boto3.client(
             "s3",
-            endpoint_url=os.environ["AWS_ENDPOINT_URL_S3"],
+            endpoint_url=endpoint,
             region_name=os.getenv("AWS_REGION", "ap-southeast-1"),
-            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         for destination, key in missing:
@@ -106,7 +122,7 @@ def _local_answer(query: str) -> str:
         return "Check affected leaves, isolate badly affected plants, and consult a local agriculture officer for a confirmed diagnosis."
     if "fertilizer" in lower or "fertiliser" in lower:
         return "Avoid applying fertilizer without a soil test. Use crop and soil details for a specific recommendation."
-    return "Offline AI is enabled. Ask about crops, diseases, soil, weather, or fertilizers."
+    return "Local fallback is active. Ask about crops, diseases, soil, weather, or fertilizers when the service is available."
 
 
 def _generate_with_gemini(query: str, results: list[str]) -> str:
@@ -121,6 +137,9 @@ def _generate_with_gemini(query: str, results: list[str]) -> str:
 
 def generate_answer(query: str, results: list[str]) -> tuple[str, str]:
     if offline_ai_enabled:
+        return _local_answer(query), "fallback"
+    if not results:
+        logger.info("Mode used: fallback; no RAG documents available")
         return _local_answer(query), "fallback"
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
