@@ -32,7 +32,7 @@ def _load_resources() -> bool:
             return True
         try:
             import faiss
-            from sentence_transformers import SentenceTransformer
+            from fastembed import TextEmbedding
 
             if not INDEX_PATH.is_file() or not DOCUMENTS_PATH.is_file():
                 raise FileNotFoundError("RAG index or processed documents are missing")
@@ -42,7 +42,7 @@ def _load_resources() -> bool:
                 raise ValueError("processed documents must be a JSON list")
             _index = faiss.read_index(str(INDEX_PATH))
             _documents = [str(document) for document in loaded_documents]
-            _model = SentenceTransformer(MODEL_NAME)
+            _model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
             _load_error = None
             logger.info("Loaded RAG resources: %d documents", len(_documents))
             return True
@@ -67,7 +67,7 @@ def search(query: str, k: int = 10) -> list[str]:
         intent = "fertilizer"
     elif "soil" in query_lower:
         intent = "soil"
-    query_embedding = np.asarray(_model.encode([query]), dtype="float32")
+    query_embedding = np.asarray(list(_model.embed([query])), dtype="float32")
     _, indices = _index.search(query_embedding, min(max(k * 5, k), len(_documents)))
     query_terms = set(re.findall(r"[a-z0-9]+", query_lower))
     candidates: list[tuple[int, int, str]] = []

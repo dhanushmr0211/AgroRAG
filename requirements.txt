@@ -2,6 +2,6 @@ fastapi
 uvicorn[standard]
 faiss-cpu
 numpy
-sentence-transformers
 google-genai
 boto3
+fastembed
