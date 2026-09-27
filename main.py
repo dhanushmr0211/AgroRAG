@@ -1,27 +1,40 @@
+from __future__ import annotations
+
+import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from rag.query_rag import search
-
+from rag import query_rag
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+PROJECT_DIR = Path(__file__).resolve().parent
+DATA_DIR = PROJECT_DIR / "data"
+S3_BUCKET = os.getenv("S3_BUCKET", "indexdata")
+S3_FILES = {
+    DATA_DIR / "faiss_index.index": os.getenv("S3_INDEX_KEY", "faiss_index.index"),
+    DATA_DIR / "processed_docs.json": os.getenv("S3_DOCUMENTS_KEY", "processed_docs.json"),
+}
+LLM_TIMEOUT_SECONDS = 5.0
+LLM_MAX_RETRIES = 2
+offline_ai_enabled = os.getenv("OFFLINE_AI_ENABLED", "false").lower() == "true"
 
 app = FastAPI(title="Farmer AI Assistant API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",")],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept"],
 )
 
 
@@ -40,8 +53,8 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     success: bool = True
     answer: str
-    source_docs: list[str]
     mode: str
+    source_docs: list[str]
 
 
 class ErrorResponse(BaseModel):
@@ -49,69 +62,83 @@ class ErrorResponse(BaseModel):
     error: str
 
 
-LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
-LLM_MAX_RETRIES = 2
+def _download_missing_files() -> None:
+    missing = [(path, key) for path, key in S3_FILES.items() if not path.is_file()]
+    if not missing:
+        logger.info("RAG cache is present; skipping S3 downloads")
+        return
+    required = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_ENDPOINT_URL_S3")
+    if not all(os.getenv(name) for name in required):
+        logger.warning("RAG cache is incomplete and S3 credentials are not configured")
+        return
+    try:
+        import boto3
+
+        client = boto3.client(
+            "s3",
+            endpoint_url=os.environ["AWS_ENDPOINT_URL_S3"],
+            region_name=os.getenv("AWS_REGION", "ap-southeast-1"),
+            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        )
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        for destination, key in missing:
+            temporary = destination.with_suffix(destination.suffix + ".part")
+            logger.info("Streaming %s from S3", key)
+            response = client.get_object(Bucket=S3_BUCKET, Key=key)
+            with temporary.open("wb") as output:
+                for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
+                    if chunk:
+                        output.write(chunk)
+            temporary.replace(destination)
+    except Exception:
+        logger.exception("Unable to download RAG resources from S3")
 
 
-def rag_only_answer(results: list[str]) -> str:
-    return "\n".join(results[:3]) or "No relevant data found in database."
+@app.on_event("startup")
+async def startup() -> None:
+    await asyncio.to_thread(_download_missing_files)
 
 
-def call_gemini(query: str, results: list[str]) -> str:
-    from google import genai
+def _local_answer(query: str) -> str:
+    lower = query.lower()
+    if any(word in lower for word in ("disease", "yellow", "spot")):
+        return "Check affected leaves, isolate badly affected plants, and consult a local agriculture officer for a confirmed diagnosis."
+    if "fertilizer" in lower or "fertiliser" in lower:
+        return "Avoid applying fertilizer without a soil test. Use crop and soil details for a specific recommendation."
+    return "Offline AI is enabled. Ask about crops, diseases, soil, weather, or fertilizers."
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not configured")
 
-    context = "\n".join(results)
-    prompt = f"""
-You are an agricultural expert.
-
-Answer using only the context below.
-
-Context:
-{context}
-
-Question:
-{query}
-"""
-    client = genai.Client(api_key=api_key)
-    response: Any = client.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
-        contents=prompt,
-    )
-    answer = getattr(response, "text", None)
-    if not isinstance(answer, str) or not answer.strip():
-        raise RuntimeError("Gemini returned an empty response")
-    return answer.strip()
+def _generate_with_gemini(query: str, results: list[str]) -> str:
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(query_rag.llm_generate, query, results)
+    try:
+        return future.result(timeout=LLM_TIMEOUT_SECONDS)
+    finally:
+        future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def generate_answer(query: str, results: list[str]) -> tuple[str, str]:
-    """Try Gemini with bounded retries, then return a RAG-only answer."""
-    fallback = "\n".join(results[:3]) or "No relevant data found in database."
+    if offline_ai_enabled:
+        return _local_answer(query), "fallback"
     for attempt in range(LLM_MAX_RETRIES + 1):
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(call_gemini, query, results)
         try:
-            answer = future.result(timeout=LLM_TIMEOUT_SECONDS)
-            logger.info("LLM success on attempt %d", attempt + 1)
+            answer = _generate_with_gemini(query, results)
+            logger.info("Mode used: rag+llm; attempt=%d", attempt + 1)
             return answer, "rag+llm"
-        except FutureTimeoutError:
-            logger.warning("LLM timeout on attempt %d", attempt + 1)
-        except Exception:
-            logger.exception("LLM failure on attempt %d", attempt + 1)
-        finally:
-            future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-
-    logger.error("LLM failed after %d attempts; using RAG-only answer", LLM_MAX_RETRIES + 1)
-    return fallback, "rag"
+        except (FutureTimeoutError, Exception) as exc:
+            logger.warning("Gemini attempt %d failed: %s", attempt + 1, exc)
+    if results:
+        logger.info("Mode used: rag")
+        return query_rag.rag_only_answer(results), "rag"
+    logger.info("Mode used: fallback")
+    return _local_answer(query), "fallback"
 
 
 @app.get("/health")
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+async def health_check() -> dict[str, Any]:
+    return {"status": "ok", "rag": query_rag.status(), "offline_ai_enabled": offline_ai_enabled}
 
 
 @app.exception_handler(RequestValidationError)
@@ -120,14 +147,13 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
 
 
 @app.post("/ask", response_model=AskResponse | ErrorResponse)
-def ask(request: AskRequest) -> AskResponse | JSONResponse:
+async def ask(request: AskRequest) -> AskResponse | JSONResponse:
     query = request.query.strip()
-    logger.info("Incoming query: %s", query)
+    logger.info("Query: %s", query)
     try:
-        results = search(query, k=10)
-        logger.info("Retrieved docs count: %d", len(results))
-        answer, mode = generate_answer(query, results)
-        return AskResponse(answer=answer, source_docs=results[:3], mode=mode)
-    except Exception as exc:
+        results = await asyncio.to_thread(query_rag.search, query, 10)
+        answer, mode = await asyncio.to_thread(generate_answer, query, results)
+        return AskResponse(answer=answer, mode=mode, source_docs=results[:3])
+    except Exception:
         logger.exception("Request failed")
-        return JSONResponse(status_code=500, content={"success": False, "error": str(exc)})
+        return JSONResponse(status_code=500, content={"success": False, "error": "Unable to answer this query right now."})

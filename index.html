@@ -1,67 +1,33 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#176b48" />
-    <meta name="description" content="A farming assistant for questions about crops, diseases, and fertilizers." />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#176b48">
+    <meta name="description" content="A farming assistant for questions about crops, diseases, soil, weather, and fertilizers.">
     <title>Farmer AI Assistant</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css">
   </head>
   <body>
     <main class="assistant-shell" aria-label="Farmer AI Assistant">
       <header class="app-header">
         <div class="brand-mark" aria-hidden="true">🌾</div>
-        <div>
-          <h1>Farmer AI Assistant</h1>
-          <p>Ask anything about crops, diseases, fertilizers</p>
-        </div>
-        <span class="online-status" id="onlineStatus" title="Connection status" aria-label="Online">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span class="status-label">Online</span>
-        </span>
-        <button class="offline-ai-button" id="offlineAI" type="button">Use Offline AI</button>
+        <div><h1>Farmer AI Assistant</h1><p>Practical answers for the field</p></div>
+        <span class="online-status" id="onlineStatus" aria-label="Online"><span class="status-dot" aria-hidden="true"></span><span class="status-label">Online</span></span>
+        <button class="offline-ai-button" id="offlineAI" type="button">Enable Offline AI</button>
       </header>
-
       <section class="chat-panel" aria-label="Conversation">
         <div class="messages" id="messages" aria-live="polite" aria-relevant="additions">
-          <article class="message message--assistant message--welcome">
-            <div class="avatar" aria-hidden="true">🌱</div>
-            <div class="bubble">
-              <p>Hi 👋 I'm your farming assistant. Ask me anything!</p>
-              <time>Now</time>
-            </div>
-          </article>
+          <article class="message message--assistant message--welcome"><div class="avatar" aria-hidden="true">🌱</div><div class="bubble"><p>Hi, I’m your farming assistant. What are you growing?</p><time>Now</time></div></article>
         </div>
-
         <div class="composer-wrap">
-          <div class="typing-indicator" id="typingIndicator" role="status" aria-label="Assistant is typing" hidden>
-            <span></span><span></span><span></span>
-            <span class="typing-text">AI is typing...</span>
-          </div>
-          <form class="composer" id="chatForm">
-            <label class="sr-only" for="questionInput">Your farming question</label>
-            <input id="questionInput" name="question" type="text" autocomplete="off" maxlength="1000" placeholder="Ask about your crops..." required />
-            <button class="send-button" type="submit" aria-label="Send question" title="Send question">
-              <span aria-hidden="true">➤</span>
-            </button>
-          </form>
-          <p class="composer-note">AI answers can be incomplete. Verify important decisions locally.</p>
+          <div class="typing-indicator" id="typingIndicator" role="status" aria-label="AI is typing" hidden><span></span><span></span><span></span><span class="typing-text">AI is typing...</span></div>
+          <form class="composer" id="chatForm"><label class="sr-only" for="questionInput">Your farming question</label><input id="questionInput" name="question" type="text" autocomplete="off" maxlength="2000" placeholder="Ask about your crops..." required><button class="send-button" type="submit" aria-label="Send question" title="Send question">➤</button></form>
+          <p class="composer-note">Verify important decisions with a local agriculture professional.</p>
         </div>
       </section>
     </main>
-    <div class="modal-backdrop" id="offlineModal" hidden>
-      <section class="offline-modal" role="dialog" aria-modal="true" aria-labelledby="offlineTitle">
-        <button class="modal-close" id="offlineCancel" type="button" aria-label="Close">&times;</button>
-        <div class="modal-icon" aria-hidden="true">📦</div>
-        <h2 id="offlineTitle">Use Offline AI?</h2>
-        <p id="offlineMessage">Download AI model (~500MB)?</p>
-        <div class="modal-actions">
-          <button class="modal-secondary" id="offlineDismiss" type="button">Cancel</button>
-          <button class="modal-primary" id="offlineConfirm" type="button">Download model</button>
-        </div>
-      </section>
-    </div>
+    <div class="modal-backdrop" id="offlineModal" hidden><section class="offline-modal" role="dialog" aria-modal="true" aria-labelledby="offlineTitle"><button class="modal-close" id="offlineCancel" type="button" aria-label="Close">×</button><div class="modal-icon" aria-hidden="true">📦</div><h2 id="offlineTitle">Enable Offline AI?</h2><p id="offlineMessage">Prepare offline AI?</p><div class="modal-actions"><button class="modal-secondary" id="offlineDismiss" type="button">Cancel</button><button class="modal-primary" id="offlineConfirm" type="button">Enable Offline AI</button></div></section></div>
     <script src="app.js" defer></script>
   </body>
 </html>
