@@ -28,8 +28,9 @@ S3_FILES = {
     DATA_DIR / "faiss_index.index": os.getenv("S3_INDEX_KEY", "faiss_index.index"),
     DATA_DIR / "processed_docs.json": os.getenv("S3_DOCUMENTS_KEY", "processed_docs.json"),
 }
-LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "15.0"))
-LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30.0"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+LLM_RETRY_BACKOFF_SECONDS = float(os.getenv("LLM_RETRY_BACKOFF", "2.0"))
 offline_ai_enabled = os.getenv("OFFLINE_AI_ENABLED", "false").lower() == "true"
 
 app = FastAPI(title="Farmer AI Assistant API", version="1.0.0")
@@ -150,6 +151,10 @@ async def generate_answer(query: str, results: list[str]) -> tuple[str, str]:
             logger.warning("Gemini attempt %d timed out after %.1fs", attempt + 1, LLM_TIMEOUT_SECONDS)
         except Exception as exc:
             logger.warning("Gemini attempt %d failed: %s", attempt + 1, exc)
+        if attempt < LLM_MAX_RETRIES:
+            backoff = LLM_RETRY_BACKOFF_SECONDS * (2 ** attempt)
+            logger.info("Retrying in %.1fs...", backoff)
+            await asyncio.sleep(backoff)
     if results:
         logger.info("Mode used: rag")
         return query_rag.rag_only_answer(results), "rag"

@@ -1,6 +1,4 @@
-const defaultApiOrigin = window.location.protocol === 'http:' || window.location.protocol === 'https:'
-  ? `${window.location.protocol}//${window.location.hostname}:8000`
-  : 'http://localhost:8000';
+const defaultApiOrigin = window.location.origin;
 const API_URL = window.FARMER_API_URL || `${defaultApiOrigin}/ask`;
 const OFFLINE_FLAG = 'offline_ai_enabled';
 const elements = {
