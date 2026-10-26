@@ -28,8 +28,8 @@ S3_FILES = {
     DATA_DIR / "faiss_index.index": os.getenv("S3_INDEX_KEY", "faiss_index.index"),
     DATA_DIR / "processed_docs.json": os.getenv("S3_DOCUMENTS_KEY", "processed_docs.json"),
 }
-LLM_TIMEOUT_SECONDS = 5.0
-LLM_MAX_RETRIES = 2
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "15.0"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
 offline_ai_enabled = os.getenv("OFFLINE_AI_ENABLED", "false").lower() == "true"
 
 app = FastAPI(title="Farmer AI Assistant API", version="1.0.0")
@@ -128,17 +128,14 @@ def _local_answer(query: str) -> str:
     return "Local fallback is active. Ask about crops, diseases, soil, weather, or fertilizers when the service is available."
 
 
-def _generate_with_gemini(query: str, results: list[str]) -> str:
-    executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(query_rag.llm_generate, query, results)
-    try:
-        return future.result(timeout=LLM_TIMEOUT_SECONDS)
-    finally:
-        future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
+async def _generate_with_gemini(query: str, results: list[str]) -> str:
+    return await asyncio.wait_for(
+        asyncio.to_thread(query_rag.llm_generate, query, results),
+        timeout=LLM_TIMEOUT_SECONDS,
+    )
 
 
-def generate_answer(query: str, results: list[str]) -> tuple[str, str]:
+async def generate_answer(query: str, results: list[str]) -> tuple[str, str]:
     if offline_ai_enabled:
         return _local_answer(query), "fallback"
     if not results:
@@ -146,10 +143,12 @@ def generate_answer(query: str, results: list[str]) -> tuple[str, str]:
         return _local_answer(query), "fallback"
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            answer = _generate_with_gemini(query, results)
+            answer = await _generate_with_gemini(query, results)
             logger.info("Mode used: rag+llm; attempt=%d", attempt + 1)
             return answer, "rag+llm"
-        except (FutureTimeoutError, Exception) as exc:
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.warning("Gemini attempt %d timed out after %.1fs", attempt + 1, LLM_TIMEOUT_SECONDS)
+        except Exception as exc:
             logger.warning("Gemini attempt %d failed: %s", attempt + 1, exc)
     if results:
         logger.info("Mode used: rag")
@@ -174,7 +173,7 @@ async def ask(request: AskRequest) -> AskResponse | JSONResponse:
     logger.info("Query: %s", query)
     try:
         results = await asyncio.to_thread(query_rag.search, query, 10)
-        answer, mode = await asyncio.to_thread(generate_answer, query, results)
+        answer, mode = await generate_answer(query, results)
         return AskResponse(answer=answer, mode=mode, source_docs=results[:3])
     except Exception:
         logger.exception("Request failed")

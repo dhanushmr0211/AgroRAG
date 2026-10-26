@@ -101,15 +101,26 @@ def llm_generate(query: str, context_docs: list[str]) -> str:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
     context = "\n".join(context_docs)
-    response = genai.Client(api_key=api_key).models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        contents=("You are an agricultural assistant. Use only this context. If it does not answer the question, say 'Not enough data'. "
-                  f"Be concise and practical.\n\nContext:\n{context}\n\nQuestion:\n{query}"),
-    )
-    answer = getattr(response, "text", None)
-    if not isinstance(answer, str) or not answer.strip():
-        raise RuntimeError("Gemini returned an empty response")
-    return answer.strip()
+    client = genai.Client(api_key=api_key)
+    try:
+        response = client.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=(
+                "You are an agricultural assistant. Use only this context. If it does not answer the question, say 'Not enough data'. "
+                f"Be concise and practical.\n\nContext:\n{context}\n\nQuestion:\n{query}"
+            ),
+        )
+        answer = getattr(response, "text", None)
+        if not isinstance(answer, str) or not answer.strip():
+            raise RuntimeError("Gemini returned an empty response")
+        return answer.strip()
+    finally:
+        close_fn = getattr(client, "close", None)
+        if callable(close_fn):
+            try:
+                close_fn()
+            except Exception:
+                pass
 
 
 def rag_pipeline(query: str) -> str:
