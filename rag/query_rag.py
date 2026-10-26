@@ -95,7 +95,7 @@ def rag_only_answer(results: list[str]) -> str:
 
 
 def llm_generate(query: str, context_docs: list[str]) -> str:
-    from google import genai
+    from google import genai  # pyrefly: ignore[missing-import]
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -104,7 +104,7 @@ def llm_generate(query: str, context_docs: list[str]) -> str:
     client = genai.Client(api_key=api_key)
     try:
         response = client.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
             contents=(
                 "You are an agricultural assistant. Use only this context. If it does not answer the question, say 'Not enough data'. "
                 f"Be concise and practical.\n\nContext:\n{context}\n\nQuestion:\n{query}"
