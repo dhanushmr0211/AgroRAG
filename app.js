@@ -63,9 +63,15 @@ function markOfflineAIEnabled() {
   elements.offlineAI.classList.add('is-enabled');
   elements.offlineAI.textContent = 'Offline AI ready';
 }
+function markOfflineAIDisabled() {
+  localStorage.removeItem(OFFLINE_FLAG);
+  elements.offlineAI.classList.remove('is-enabled');
+  elements.offlineAI.textContent = 'Enable Offline AI';
+}
 function openOfflineModal() {
   if (offlineEnabled()) {
-    addMessage('Offline AI is ready. A local model slot is prepared for Gemma, TinyLlama, or WebLLM.', 'assistant', 'Offline AI');
+    markOfflineAIDisabled();
+    addMessage('Offline mode disabled. Switched back to online assistant.', 'assistant', 'Online');
     return;
   }
   elements.offlineMessage.textContent = 'Prepare offline AI (~500 MB simulated download)?';
@@ -80,7 +86,7 @@ function simulateOfflineDownload() {
   elements.offlineMessage.textContent = 'Preparing offline AI (simulation)...';
   window.setTimeout(() => {
     markOfflineAIEnabled(); closeOfflineModal();
-    addMessage('Offline AI is ready. Local answers will be used when the service or internet is unavailable.', 'assistant', 'Offline AI');
+    addMessage('Offline fallback ready. Will be used when offline or when connection fails.', 'assistant', 'Offline AI');
   }, 900);
 }
 
@@ -90,7 +96,7 @@ elements.form.addEventListener('submit', async (event) => {
   if (!question) return;
   addMessage(question, 'user'); elements.input.value = ''; setLoading(true);
   try {
-    const result = offlineEnabled()
+    const result = !navigator.onLine
       ? { answer: localAnswer(question), mode: 'fallback' }
       : await askAssistant(question);
     addMessage(result.answer, 'assistant', result.mode === 'rag+llm' ? 'AI answer' : result.mode.toUpperCase());

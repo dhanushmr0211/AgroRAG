@@ -66,13 +66,18 @@ async function askAssistant(question) {
 }
 function closeOfflineModal() { elements.offlineModal.hidden = true; }
 function markOfflineAIEnabled() { localStorage.setItem(OFFLINE_FLAG, 'true'); elements.offlineAI.classList.add('is-enabled'); elements.offlineAI.textContent = 'Offline AI ready'; }
+function markOfflineAIDisabled() { localStorage.removeItem(OFFLINE_FLAG); elements.offlineAI.classList.remove('is-enabled'); elements.offlineAI.textContent = 'Enable Offline AI'; }
 function openOfflineModal() {
-  if (offlineEnabled()) { addMessage('Offline AI is ready. The local model slot is prepared for a future Gemma, TinyLlama, or WebLLM integration.', 'assistant', 'Offline AI'); return; }
+  if (offlineEnabled()) {
+    markOfflineAIDisabled();
+    addMessage('Offline mode disabled. Switched back to online assistant.', 'assistant', 'Online');
+    return;
+  }
   elements.offlineModal.hidden = false; elements.offlineConfirm.focus();
 }
 function simulateOfflineDownload() {
   elements.offlineConfirm.disabled = true; elements.offlineConfirm.textContent = 'Preparing...'; elements.offlineMessage.textContent = 'Preparing offline AI (simulation)...';
-  window.setTimeout(() => { markOfflineAIEnabled(); closeOfflineModal(); addMessage('Offline AI is ready. Local answers will be used when the service or internet is unavailable.', 'assistant', 'Offline AI'); }, 900);
+  window.setTimeout(() => { markOfflineAIEnabled(); closeOfflineModal(); addMessage('Offline fallback ready. Will be used when offline or when connection fails.', 'assistant', 'Offline AI'); }, 900);
 }
 elements.form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -81,7 +86,7 @@ elements.form.addEventListener('submit', async (event) => {
   addMessage(question, 'user'); elements.input.value = ''; setLoading(true);
   try {
     let result;
-    if (offlineEnabled()) result = { answer: readCachedAnswer(question) || localAnswer(question), mode: 'fallback' };
+    if (!navigator.onLine) result = { answer: readCachedAnswer(question) || localAnswer(question), mode: 'fallback' };
     else { result = await askAssistant(question); cacheAnswer(question, result.answer); }
     addMessage(result.answer, 'assistant', result.mode === 'rag+llm' ? 'AI answer' : result.mode.toUpperCase());
   } catch (error) {
