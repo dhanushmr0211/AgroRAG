@@ -58,7 +58,7 @@ function cacheAnswer(question, answer) {
 function setLoading(loading) { elements.typing.hidden = !loading; elements.input.disabled = loading; elements.send.disabled = loading; if (loading) scrollToLatest(); }
 async function askAssistant(question) {
   if (!navigator.onLine) throw new Error('offline');
-  const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ query: question }), signal: AbortSignal.timeout(15000) });
+  const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ query: question }), signal: AbortSignal.timeout(90000) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) throw new Error(data.error || `Request failed (${response.status})`);
   if (typeof data.answer !== 'string' || !data.answer.trim()) throw new Error('Empty response');
